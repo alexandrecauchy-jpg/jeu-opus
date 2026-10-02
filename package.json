@@ -1,0 +1,11 @@
+{
+  "name": "le-donjon-des-os",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:single": "node tools/build-single.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}

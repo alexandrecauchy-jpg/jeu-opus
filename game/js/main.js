@@ -140,7 +140,16 @@ class Game {
     const loader = new GLTFLoader();
     this.assets = { models: {} };
     let done = 0;
-    await Promise.all(ASSETS.map(n => loader.loadAsync(`assets/${n}.glb`).then(g => {
+    // Version « fichier unique » : les .glb sont intégrés en base64 dans la page (aucun téléchargement)
+    const embedded = window.__EMBEDDED_ASSETS;
+    const load = n => {
+      if (!embedded) return loader.loadAsync(`assets/${n}.glb`);
+      const bin = atob(embedded[n]);
+      const buf = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      return loader.parseAsync(buf.buffer, '');
+    };
+    await Promise.all(ASSETS.map(n => load(n).then(g => {
       this.assets.models[n] = g;
       done++;
       $('load-fill').style.width = (100 * done / ASSETS.length) + '%';

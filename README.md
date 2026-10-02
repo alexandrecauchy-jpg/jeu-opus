@@ -8,6 +8,10 @@ Une partie dure environ **15 à 30 minutes**.
 
 ## Lancer le jeu
 
+**Le plus simple :** double-cliquez sur `dist/donjon-des-os.html`. C'est un fichier unique qui contient tout le jeu (code et modèles Blender) et fonctionne sans serveur ni internet.
+
+**Version de développement** (pour modifier le code) :
+
 Le jeu tourne dans le navigateur (Chrome, Edge ou Firefox). Comme il charge des fichiers 3D, il faut passer par un petit serveur web local plutôt que d'ouvrir `index.html` directement.
 
 - **Windows** : double-cliquez sur `lancer_jeu.bat`
@@ -54,6 +58,15 @@ Pour ouvrir les personnages dans Blender : `blender/personnages.blend`. Appuyez 
 ```bash
 blender --background --python blender/build_assets.py
 # ou, sans installer Blender : pip install bpy==4.2.0 && python3 blender/build_assets.py
+```
+
+### Régénérer le fichier unique
+
+Après une modification du code ou des modèles :
+
+```bash
+npm install
+npm run build:single   # écrit dist/donjon-des-os.html
 ```
 
 ### Organisation du code
