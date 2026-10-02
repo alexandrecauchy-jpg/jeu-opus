@@ -24,11 +24,11 @@ export const WEAPONS = {
 export const WEAPON_ORDER = ['rusty', 'knight', 'mace', 'axe', 'spear', 'hammer', 'flame'];
 
 export const ENEMIES = {
-  warrior:  { hp: 50,   dmg: 10, speed: 3.1, range: 2.7, scale: 1.35, weapon: 'w_rusty', gold: [2, 6] },
-  archer:   { hp: 34,   dmg: 9,  speed: 3.33, range: 13.0,  scale: 1.28, weapon: 'a_bow', gold: [2, 5], ranged: true },
-  knight:   { hp: 120,   dmg: 15, speed: 2.64, range: 2.9, scale: 1.49, weapon: 'w_rusty', shield: true, helmet: true, armored: true, gold: [5, 10] },
-  champion: { hp: 520,  dmg: 22, speed: 2.99, range: 4.2, scale: 1.96, weapon: 'w_axe', helmet: true, armored: true, elite: true, gold: [40, 60] },
-  boss:     { hp: 1600, dmg: 26, speed: 2.76, range: 5.7, scale: 2.7, weapon: 'w_boss', crown: true, elite: true, boss: true, gold: [0, 0] },
+  warrior:  { hp: 75,   dmg: 15, speed: 3.5, range: 2.7, scale: 1.35, weapon: 'w_rusty', gold: [2, 6] },
+  archer:   { hp: 48,   dmg: 14,  speed: 3.6, range: 13.0,  scale: 1.28, weapon: 'a_bow', gold: [2, 5], ranged: true },
+  knight:   { hp: 180,   dmg: 22, speed: 3.0, range: 2.9, scale: 1.49, weapon: 'w_rusty', shield: true, helmet: true, armored: true, gold: [5, 10] },
+  champion: { hp: 800,  dmg: 30, speed: 3.4, range: 4.2, scale: 1.96, weapon: 'w_axe', helmet: true, armored: true, elite: true, gold: [40, 60] },
+  boss:     { hp: 2300, dmg: 32, speed: 3.1, range: 5.7, scale: 2.7, weapon: 'w_boss', crown: true, elite: true, boss: true, gold: [0, 0] },
 };
 
 // --- Carte -----------------------------------------------------------------

@@ -216,9 +216,17 @@ export class World {
       depthWrite: false, transparent: true,
     }));
     glow.position.copy(pos);
-    glow.scale.setScalar(size * 3.2);
+    glow.scale.setScalar(size * 2.4);
     this.scene.add(glow);
-    const f = { pos: pos.clone(), sprite: s, glow, size, intensity, wallTile, color, phase: Math.random() * 100, visible: true };
+    // cœur incandescent de la flamme
+    const core = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this.glowTex, color: 0xfff1c8, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
+    }));
+    core.position.copy(pos).y -= size * 0.12;
+    core.scale.setScalar(size * 0.55);
+    core.renderOrder = 7;
+    this.scene.add(core);
+    const f = { pos: pos.clone(), sprite: s, glow, core, size, intensity, wallTile, color, phase: Math.random() * 100, visible: true };
     this.flames.push(f);
     return f;
   }
@@ -257,7 +265,7 @@ export class World {
       const vis = !hidden && !f.off;
       if (vis !== f.visible) {
         f.visible = vis;
-        f.sprite.visible = f.glow.visible = vis;
+        f.sprite.visible = f.glow.visible = f.core.visible = vis;
         if (f.model) f.model.visible = vis;
       }
       if (!vis) continue;
@@ -266,6 +274,8 @@ export class World {
       const fl = 0.85 + 0.1 * Math.sin(this.time * 13 + f.phase) + 0.08 * Math.sin(this.time * 31 + f.phase * 2);
       f.sprite.scale.set(f.size * 0.7 * (0.9 + 0.15 * Math.sin(this.time * 17 + f.phase)), f.size * fl * 1.1, 1);
       f.flicker = fl;
+      f.core.scale.setScalar(f.size * 0.55 * (0.85 + 0.25 * fl));
+      f.glow.material.opacity = 0.75 + 0.25 * fl;
       if (Math.random() < dt * 3 * f.size) {
         this.game.particles.emit(f.pos.x, f.pos.y + 0.2, f.pos.z, {
           vel: [0, 1.5, 0], spread: 0.6, color: [1, 0.5, 0.15], size: 0.18, life: 0.9, gravity: -0.5,

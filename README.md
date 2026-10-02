@@ -26,7 +26,8 @@ Ces scripts ont besoin de Python, puis ouvrent `http://localhost:8000`. Sans Pyt
 | Se déplacer | `Z Q S D` (AZERTY), `W A S D` (QWERTY) ou flèches |
 | Caméra (3e personne) | Souris (cliquez dans le jeu pour la capturer, Échap pour la libérer) |
 | Attaquer | Clic gauche, maintenir pour un combo de 3 coups. Le coup part vers la touche de direction tenue (ex. S + clic = derrière), sinon vers l'ennemi le plus proche, de tous les côtés |
-| Roulade (invulnérable) | `Espace` ou clic droit |
+| Lever le bouclier | Clic droit ou `Maj` maintenu : les flèches rebondissent, les coups de face sont très atténués (pas les frappes au sol) |
+| Roulade (invulnérable) | `Espace` |
 | Boire une potion | `F` |
 | Interagir (coffres, armes, parchemins) | `E` |
 | Changer d'arme | `1` à `7`, molette ou `Tab` |

@@ -252,8 +252,40 @@ export class Player {
     this.game.audio.play('potion');
   }
 
-  hurt(dmg, from) {
+  // Coup paré avec le bouclier : les flèches rebondissent, les coups au corps à corps sont très atténués.
+  blockHit(dmg, from, opts) {
+    const g = this.game;
+    const taken = opts.projectile ? 0 : Math.round(dmg * (opts.heavy ? 0.5 : 0.15));
+    this.hp = Math.max(1, this.hp - taken);
+    this.iframes = 0.15;
+    g.stats.damageTaken += taken;
+    g.audio.play('clang');
+    g.shake(opts.heavy ? 0.45 : 0.15);
+    _v.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    g.particles.burst(this.pos.x + _v.x * 0.8, 1.7, this.pos.z + _v.z * 0.8, opts.projectile ? 14 : 22,
+      { spread: 6, vel: [_v.x * 2, 2, _v.z * 2], color: [1, 0.85, 0.5], size: 0.2, life: 0.35, gravity: 9 });
+    g.floatText.show(_v2.copy(this.pos).setY(2.6), taken ? 'Paré  -' + taken : 'Paré !', 'blocked');
+    this.rig.flash(0x99bbff, 0.12);
+    _v.set(this.pos.x - from.x, 0, this.pos.z - from.z).normalize();
+    this.vel.addScaledVector(_v, opts.heavy ? 8 : opts.projectile ? 1.5 : 3.5);
+    if (opts.heavy) {                // un coup d'élite brise la garde
+      this.state = 'hit';
+      this.t = -0.2;
+      this.rig.play('Hit', { loop: false, fade: 0.05, speed: 1.2, restart: true });
+    } else {
+      this.blockHitT = 0.3;
+      this.rig.play('BlockHit', { loop: false, fade: 0.05, speed: 1.3, restart: true });
+    }
+    g.stats.blocks = (g.stats.blocks || 0) + 1;
+    return 'blocked';
+  }
+
+  hurt(dmg, from, opts = {}) {
     if (!this.alive || this.iframes > 0 || this.state === 'cutscene' || this.state === 'victory') return false;
+    if (this.state === 'block' && from && !opts.unblockable) {
+      const toAttacker = Math.atan2(from.x - this.pos.x, from.z - this.pos.z);
+      if (Math.abs(angleDiff(toAttacker, this.yaw)) < 1.35) return this.blockHit(dmg, from, opts);
+    }
     this.hp = Math.max(0, this.hp - dmg);
     this.iframes = 0.55;
     const g = this.game;
@@ -275,7 +307,7 @@ export class Player {
       this.rig.play('Die', { loop: false, fade: 0.1 });
       g.audio.play('death');
       g.onPlayerDeath();
-    } else if (this.state === 'move' || this.state === 'drink') {
+    } else if (this.state === 'move' || this.state === 'drink' || this.state === 'block') {
       this.state = 'hit';
       this.t = 0;
       this.rig.play('Hit', { loop: false, fade: 0.05, speed: 1.4, restart: true });
@@ -342,7 +374,19 @@ export class Player {
         this.vel.multiplyScalar(Math.max(0, 1 - dt * 10));
         if (this.t >= 0.28) this.state = 'move';
         break;
+      case 'block': {
+        // garde levée : on avance lentement, le bouclier suit la direction de la caméra
+        desired = _v2.copy(mv).multiplyScalar(3.2);
+        this.yaw = turnTo(this.yaw, g.camYaw, dt * 12);
+        this.blockHitT = Math.max(0, (this.blockHitT || 0) - dt);
+        if (this.blockHitT <= 0) this.rig.play('Block', { fade: 0.12 });
+        if (!inp.blockHeld) this.state = 'move';
+        else if (inp.attackHeld) this.startAttack(0);
+        else if (inp.consumeRoll() && this.rollCd <= 0) this.startRoll(mv.lengthSq() > 0 ? mv : new V(Math.sin(this.yaw), 0, Math.cos(this.yaw)));
+        break;
+      }
       case 'move': {
+        if (inp.blockHeld) { this.state = 'block'; this.t = 0; this.rig.play('Block', { fade: 0.12 }); break; }
         desired = _v2.copy(mv).multiplyScalar(speed);
         if (mv.lengthSq() > 0) {
           this.yaw = turnTo(this.yaw, Math.atan2(mv.x, mv.z), dt * 14);
@@ -570,7 +614,12 @@ export class Enemy {
         break;
       case 'idle':
         if (this.aggroSoon > 0) { this.aggroSoon -= dt; if (this.aggroSoon <= 0) this.aggro(); }
-        if (p.alive && dist < 13 && g.world.los(this.pos.x, this.pos.z, p.pos.x, p.pos.z)) this.aggro();
+        // test de vision espacé (fluidité) : 5 fois par seconde
+        this.losT = (this.losT || Math.random() * 0.2) - dt;
+        if (this.losT <= 0) {
+          this.losT = 0.2;
+          if (p.alive && dist < 17 && g.world.los(this.pos.x, this.pos.z, p.pos.x, p.pos.z)) this.aggro();
+        }
         this.rig.play('Idle');
         break;
       case 'hit':
@@ -585,7 +634,7 @@ export class Enemy {
         if (this.t >= this.atkDur) {
           this.state = 'chase';
           this.t = 0;
-          this.cd = this.cfg.ranged ? 1.6 + Math.random() * 1.2 : this.cfg.elite ? 0.6 + Math.random() * 0.8 : 0.9 + Math.random() * 0.9;
+          this.cd = this.cfg.ranged ? 1.0 + Math.random() * 0.9 : this.cfg.elite ? 0.4 + Math.random() * 0.5 : 0.5 + Math.random() * 0.6;
         }
         break;
       case 'chase': {
@@ -646,12 +695,12 @@ export class Enemy {
       return false;
     }
     if (this.kind === 'champion') {
-      if (dist < 4.8 && Math.random() < 0.6) { this.startAttack('Attack', 0.85); return true; }
+      if (dist < 4.8 && Math.random() < 0.6) { this.startAttack('Attack', 1.0); return true; }
       if (dist < 7.5) { this.startAttack('Slam', 0.85); this.warn = this.game.rings.add(this.pos.x, this.pos.z, { mode: 'warn', r1: 6, dur: this.atkDur * 0.52, color: 0xff5020 }); return true; }
       return false;
     }
     if (dist < this.cfg.range + this.game.player.radius + 0.2) {
-      this.startAttack('Attack', this.kind === 'knight' ? 0.9 : 1.0);
+      this.startAttack('Attack', this.kind === 'knight' ? 1.05 : 1.2);
       return true;
     }
     return false;
@@ -675,12 +724,12 @@ export class Enemy {
       g.debris.spawn(this.pos.x, 0.2, this.pos.z, 8, 1.4);
       g.audio.play('slam');
       g.shake(0.7);
-      if (dist < R + p.radius) p.hurt(this.cfg.dmg * 1.15, this.pos);
+      if (dist < R + p.radius) p.hurt(this.cfg.dmg * 1.15, this.pos, { unblockable: true });
       return;
     }
     const arc = this.cfg.elite ? Math.PI * 0.8 : Math.PI * 0.6;
     const reach = this.cfg.range + p.radius + 0.35;
-    if (dist < reach && Math.abs(angleDiff(toYaw, this.yaw)) < arc) p.hurt(this.cfg.dmg, this.pos);
+    if (dist < reach && Math.abs(angleDiff(toYaw, this.yaw)) < arc) p.hurt(this.cfg.dmg, this.pos, { heavy: !!this.cfg.elite });
     g.audio.play(this.cfg.elite ? 'heavySwing' : 'swing');
   }
 
@@ -754,7 +803,7 @@ export class Boss extends Enemy {
 
   chooseAction(dist, sees) {
     if (this.cd > 0) return false;
-    const sp = this.enraged ? 1.15 : 0.9;
+    const sp = this.enraged ? 1.3 : 1.05;
     if (this.phase === 2 && this.volleyCd <= 0 && dist > 5) {
       this.volleyCd = 5 + Math.random() * 2;
       this.startAttack('Shoot', 1.1);
@@ -846,7 +895,7 @@ export class Projectile {
     const d = Math.hypot(p.pos.x - this.pos.x, p.pos.z - this.pos.z);
     if (d < p.radius + 0.25 && p.alive) {
       if (p.iframes > 0 && p.state === 'roll') return true;   // esquivé !
-      if (p.hurt(this.dmg, this.pos)) {
+      if (p.hurt(this.dmg, this.pos, { projectile: true })) {
         g.particles.burst(this.pos.x, this.pos.y, this.pos.z, 10, { spread: 4, color: [1, 0.3, 0.1], size: 0.3, life: 0.4 });
         return false;
       }

@@ -11,7 +11,9 @@ Les fichiers .glb sont écrits dans game/assets/.
 import bpy
 import os
 import math
+import bmesh
 from math import radians
+from mathutils import Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "game", "assets")
@@ -85,6 +87,20 @@ def part(kind, loc, scale, material, bone=None, rot=(0, 0, 0), bevel=0.0,
         vg = o.vertex_groups.new(name=bone)
         vg.add(list(range(len(o.data.vertices))), 1.0, "REPLACE")
     return o
+
+
+def long_bone(a, b, r, material, bone, knob=None):
+    """Os long entre deux points : diaphyse + épiphyses renflées aux extrémités."""
+    a, b = Vector(a), Vector(b)
+    d = b - a
+    rot = Vector((0, 0, 1)).rotation_difference(d.normalized()).to_euler()
+    mid = (a + b) / 2
+    shaft = part("cyl", tuple(mid), (r * 2, r * 2, d.length), material, bone,
+                 rot=tuple(math.degrees(x) for x in rot), v=8, smooth=True)
+    k = knob or r * 1.4
+    ea = part("sphere", tuple(a), (k * 2, k * 2, k * 2), material, bone, v=8, smooth=True)
+    eb = part("sphere", tuple(b), (k * 2, k * 2, k * 2), material, bone, v=8, smooth=True)
+    return join([shaft, ea, eb], "os")
 
 
 def join(objs, name):
@@ -387,6 +403,16 @@ def build_hero(M, do_export=True):
               "head": (-20, 0, 0), "hips": {"l": (0, 0.06, 0)}}),
         (21, {"upperarm_R": (-170, 0, 15), "forearm_R": (-10, 0, 0), "upperarm_L": (-20, 0, -30), "forearm_L": (-60, 0, 0), "head": (-15, 0, 0)}),
     ])
+    guard = {"upperarm_L": (-62, 85, -8), "forearm_L": (-78, 0, 0), "upperarm_R": (-25, 0, 18), "forearm_R": (-45, 0, 0),
+             "spine": (8, 12, 0), "chest": (4, 10, 0), "head": (-4, -18, 0), "hips": {"l": (0, -0.1, 0)},
+             "thigh_L": (-28, 0, 0), "shin_L": (30, 0, 0), "thigh_R": (14, 0, 0), "shin_R": (24, 0, 0)}
+    guard2 = merge(guard, {"chest": (6, 10, 0), "hips": {"l": (0, -0.11, 0)}})
+    add_action(rig, "Block", [(1, guard), (21, guard2), (41, guard)])
+    add_action(rig, "BlockHit", [
+        (1, guard),
+        (4, merge(guard, {"spine": (-6, 14, 0), "chest": (-8, 12, 0), "upperarm_L": (-55, 85, -8), "hips": {"l": (0, -0.12, 0.08)}})),
+        (12, guard),
+    ])
     if do_export:
         export("hero.glb", [rig, body])
     return rig
@@ -399,43 +425,75 @@ def build_skeleton(M, eye_mat_key="ghost_eye", fname="skeleton.glb", name="Skele
     rig = make_armature(name, SKEL_EXTRA)
     B, D, E = M["bone"], M["bone_dark"], M[eye_mat_key]
     P = []
-    P.append(part("cube", (0, 0, 0.97), (0.28, 0.15, 0.1), B, "hips", bevel=0.03))
-    P.append(part("cone", (0, 0, 0.86), (0.42, 0.3, 0.22), M["rag"], "hips", v=7, r2=0.36))
-    P.append(part("cube", (0, 0, 0.99), (0.33, 0.2, 0.05), M["leather"], "hips"))
-    for i in range(5):
-        z = 1.04 + i * 0.05
-        P.append(part("cyl", (0, 0.03, z), (0.07, 0.07, 0.04), B, "spine", v=6))
-    for i, z in enumerate((1.28, 1.35, 1.42, 1.48)):
-        w = 0.3 + 0.03 * min(i, 2)
-        P.append(part("torus", (0, 0, z), (w, 0.22, 0.25), B, "chest" if z > 1.31 else "spine", v=12, minor=0.1))
-    P.append(part("cube", (0, -0.1, 1.38), (0.04, 0.03, 0.22), B, "chest"))
-    P.append(part("cube", (0, 0.02, 1.5), (0.5, 0.05, 0.04), B, "chest", bevel=0.01))
-    P.append(part("cyl", (0, 0.02, 1.56), (0.06, 0.06, 0.08), B, "chest", v=6))
-    # Crâne
-    P.append(part("sphere", (0, 0, 1.72), (0.27, 0.3, 0.27), B, "head", v=12, smooth=True))
-    P.append(part("cube", (0, -0.05, 1.64), (0.17, 0.16, 0.06), B, "head", bevel=0.02))
-    for s in (1, -1):
-        P.append(part("sphere", (0.055 * s, -0.115, 1.73), (0.075, 0.06, 0.07), D, "head", v=8))
-        P.append(part("sphere", (0.055 * s, -0.135, 1.73), (0.035, 0.03, 0.035), E, "head", v=6))
-    P.append(part("cone", (0, -0.14, 1.67), (0.04, 0.03, 0.04), D, "head", rot=(180, 0, 0), v=3))
-    P.append(part("cube", (0, -0.07, 1.585), (0.15, 0.14, 0.035), B, "jaw", bevel=0.01))
-    for i in range(5):
-        P.append(part("cube", (-0.05 + i * 0.025, -0.135, 1.605), (0.015, 0.01, 0.025), B, "jaw"))
+    # --- Bassin : ailes iliaques, sacrum, pagne en lambeaux
+    for sx in (1, -1):
+        P.append(part("sphere", (0.1 * sx, 0.01, 0.99), (0.17, 0.08, 0.15), B, "hips", rot=(0, 25 * sx, 20 * sx), v=12, smooth=True))
+        P.append(part("sphere", (0.12 * sx, -0.01, 0.92), (0.07, 0.07, 0.07), B, "hips", v=8, smooth=True))
+    P.append(part("cone", (0, 0.04, 0.95), (0.1, 0.06, 0.14), B, "hips", rot=(180, 0, 0), v=6, r2=0.25, smooth=True))
+    P.append(part("cone", (0, 0, 0.84), (0.44, 0.32, 0.24), M["rag"], "hips", v=9, r2=0.38))
+    P.append(part("cube", (0, 0, 1.0), (0.33, 0.2, 0.04), M["leather"], "hips", bevel=0.01))
+    # --- Colonne : vertèbres avec apophyses épineuses
+    for i in range(10):
+        z = 1.03 + i * 0.055
+        bone = "spine" if z < 1.3 else "chest"
+        P.append(part("cyl", (0, 0.035, z), (0.065, 0.06, 0.035), B, bone, v=8, bevel=0.006, smooth=True))
+        P.append(part("cube", (0, 0.075, z - 0.01), (0.022, 0.05, 0.025), B, bone, rot=(-25, 0, 0), bevel=0.005))
+    # --- Cage thoracique : côtes ouvertes à l'avant, sternum
+    for i, (z, w, dpt) in enumerate(((1.47, 0.27, 0.2), (1.41, 0.31, 0.23), (1.35, 0.33, 0.24),
+                                     (1.29, 0.32, 0.23), (1.23, 0.29, 0.21), (1.18, 0.25, 0.18))):
+        rib = part("torus", (0, 0.0, z), (w, dpt, 0.3), B, "chest" if z > 1.3 else "spine",
+                   rot=(-14, 0, 0), v=20, minor=0.07, smooth=True)
+        bm = bmesh.new(); bm.from_mesh(rib.data)
+        cut = 0.05 if i < 4 else 0.09
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.y < -dpt * 0.25 and abs(v.co.x) < cut], context="VERTS")
+        bm.to_mesh(rib.data); bm.free()
+        P.append(rib)
+    P.append(part("cube", (0, -0.115, 1.37), (0.045, 0.025, 0.2), B, "chest", rot=(-10, 0, 0), bevel=0.01))
+    for sx in (1, -1):
+        P.append(long_bone((0.02 * sx, -0.09, 1.52), (0.2 * sx, -0.01, 1.54), 0.018, B, "chest"))   # clavicule
+        P.append(part("cube", (0.11 * sx, 0.1, 1.42), (0.14, 0.02, 0.17), B, "chest", rot=(0, 0, -15 * sx), bevel=0.02))  # omoplate
+    P.append(part("cyl", (0, 0.02, 1.58), (0.05, 0.05, 0.08), B, "chest", v=8, smooth=True))
+    # --- Crâne : boîte crânienne, pommettes, orbites profondes, dents
+    P.append(part("sphere", (0, 0.015, 1.745), (0.26, 0.3, 0.26), B, "head", v=20, smooth=True))
+    P.append(part("cube", (0, -0.07, 1.66), (0.15, 0.12, 0.1), B, "head", bevel=0.03, smooth=True))
+    P.append(part("cube", (0, -0.12, 1.775), (0.2, 0.04, 0.04), B, "head", bevel=0.015))          # arcade
+    for sx in (1, -1):
+        P.append(part("sphere", (0.088 * sx, -0.09, 1.67), (0.07, 0.09, 0.05), B, "head", v=10, smooth=True))  # pommette
+        P.append(part("sphere", (0.05 * sx, -0.112, 1.725), (0.075, 0.06, 0.07), D, "head", v=12, smooth=True))  # orbite
+        P.append(part("sphere", (0.05 * sx, -0.141, 1.725), (0.03, 0.012, 0.03), E, "head", v=10))
+    P.append(part("cone", (0, -0.13, 1.675), (0.045, 0.03, 0.05), D, "head", rot=(180, 0, 0), v=3))
+    for i in range(8):
+        P.append(part("cube", (-0.0525 + i * 0.015, -0.128 + abs(i - 3.5) * 0.004, 1.625), (0.012, 0.012, 0.03), B, "head", bevel=0.003))
+    # mâchoire en U avec dents
+    P.append(part("cube", (0, -0.085, 1.565), (0.13, 0.06, 0.035), B, "jaw", bevel=0.012, smooth=True))
+    for sx in (1, -1):
+        P.append(part("cube", (0.065 * sx, -0.03, 1.585), (0.022, 0.12, 0.035), B, "jaw", rot=(-10, 0, 0), bevel=0.008))
+        P.append(part("cube", (0.07 * sx, 0.025, 1.62), (0.02, 0.03, 0.07), B, "jaw", bevel=0.006))
+    for i in range(8):
+        P.append(part("cube", (-0.0525 + i * 0.015, -0.11 + abs(i - 3.5) * 0.004, 1.592), (0.011, 0.011, 0.025), B, "jaw", bevel=0.003))
+    # --- Membres : os longs à extrémités renflées, deux os à l'avant-bras et à la jambe
     for s, side in ((1, "L"), (-1, "R")):
         ua, fa, hd = "upperarm_" + side, "forearm_" + side, "hand_" + side
-        P.append(part("sphere", (0.26 * s, 0, 1.49), (0.09, 0.09, 0.09), B, ua, v=8, smooth=True))
-        P.append(part("cyl", (0.27 * s, 0, 1.33), (0.05, 0.05, 0.28), B, ua, v=6))
-        P.append(part("sphere", (0.27 * s, 0, 1.18), (0.07, 0.07, 0.07), B, fa, v=8, smooth=True))
-        P.append(part("cyl", (0.265 * s, 0.01, 1.05), (0.035, 0.035, 0.25), B, fa, v=6))
-        P.append(part("cyl", (0.28 * s, -0.01, 1.05), (0.03, 0.03, 0.25), B, fa, v=6))
-        P.append(part("cube", (0.27 * s, 0, 0.89), (0.07, 0.08, 0.06), B, hd, bevel=0.01))
-        for k in range(3):
-            P.append(part("cube", (0.27 * s, -0.025 + k * 0.025, 0.84), (0.02, 0.018, 0.07), B, hd))
         th, sh = "thigh_" + side, "shin_" + side
-        P.append(part("cyl", (0.11 * s, 0, 0.74), (0.06, 0.06, 0.4), B, th, v=6))
-        P.append(part("sphere", (0.11 * s, -0.01, 0.52), (0.08, 0.08, 0.08), B, sh, v=8, smooth=True))
-        P.append(part("cyl", (0.11 * s, 0, 0.29), (0.05, 0.05, 0.42), B, sh, v=6))
-        P.append(part("cube", (0.11 * s, -0.05, 0.04), (0.08, 0.2, 0.05), B, sh, bevel=0.015))
+        P.append(part("sphere", (0.25 * s, 0.01, 1.5), (0.085, 0.085, 0.085), B, ua, v=10, smooth=True))
+        P.append(long_bone((0.265 * s, 0, 1.47), (0.27 * s, 0, 1.2), 0.026, B, ua, knob=0.034))           # humérus
+        P.append(long_bone((0.255 * s, 0.012, 1.17), (0.262 * s, 0.012, 0.94), 0.016, B, fa, knob=0.022))  # cubitus
+        P.append(long_bone((0.285 * s, -0.012, 1.16), (0.282 * s, -0.012, 0.94), 0.015, B, fa, knob=0.021))  # radius
+        P.append(part("cube", (0.27 * s, 0, 0.905), (0.05, 0.065, 0.04), B, hd, bevel=0.01))
+        for k in range(4):
+            y = -0.024 + k * 0.016
+            P.append(long_bone((0.27 * s, y, 0.89), (0.27 * s, y - 0.005, 0.83), 0.006, B, hd, knob=0.008))
+            P.append(long_bone((0.27 * s, y - 0.005, 0.83), (0.27 * s, y - 0.012, 0.79), 0.005, B, hd, knob=0.007))
+        P.append(long_bone((0.255 * s, -0.035, 0.9), (0.245 * s, -0.06, 0.85), 0.006, B, hd, knob=0.008))    # pouce
+        P.append(part("sphere", (0.11 * s, 0, 0.92), (0.075, 0.075, 0.075), B, th, v=10, smooth=True))
+        P.append(long_bone((0.11 * s, 0, 0.9), (0.11 * s, -0.005, 0.55), 0.03, B, th, knob=0.042))         # fémur
+        P.append(part("sphere", (0.11 * s, -0.045, 0.52), (0.05, 0.03, 0.05), B, sh, v=8, smooth=True))   # rotule
+        P.append(long_bone((0.105 * s, 0, 0.5), (0.108 * s, 0.005, 0.09), 0.024, B, sh, knob=0.034))       # tibia
+        P.append(long_bone((0.14 * s, 0.015, 0.48), (0.135 * s, 0.015, 0.1), 0.012, B, sh, knob=0.017))     # péroné
+        P.append(part("cube", (0.11 * s, 0.0, 0.055), (0.07, 0.09, 0.05), B, sh, bevel=0.015))
+        for k in range(4):
+            x = 0.11 * s + (k - 1.5) * 0.016
+            P.append(long_bone((x, -0.04, 0.045), (x, -0.13, 0.02), 0.008, B, sh, knob=0.01))
     body = join(P, name)
     skin(body, rig)
 

@@ -209,3 +209,43 @@ export function ringTexture() {
   ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
   return new THREE.CanvasTexture(c);
 }
+
+// Os : ivoire jauni, taches brunes, stries et petites cavités, avec relief.
+export function boneTextures(renderer) {
+  const size = 512;
+  const r = rng(99);
+  const [c, ctx] = canvas(size);
+  const [hc, hctx] = canvas(size);
+  ctx.fillStyle = '#d9ccaa'; ctx.fillRect(0, 0, size, size);
+  hctx.fillStyle = '#808080'; hctx.fillRect(0, 0, size, size);
+  // grandes variations de teinte (jaunissement, crasse)
+  for (let i = 0; i < 60; i++) {
+    const x = r() * size, y = r() * size, rad = 20 + r() * 90;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
+    const dark = r() > 0.45;
+    g.addColorStop(0, dark ? `rgba(${70 + r() * 40},${45 + r() * 25},${20 + r() * 15},${0.12 + r() * 0.25})` : 'rgba(245,238,215,0.25)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  // stries le long des os
+  for (let i = 0; i < 260; i++) {
+    const x = r() * size, y = r() * size, len = 20 + r() * 80;
+    const a = r() * 0.15 + Math.PI / 2;
+    ctx.strokeStyle = `rgba(90,70,40,${0.05 + r() * 0.12})`;
+    hctx.strokeStyle = `rgba(0,0,0,${0.15 + r() * 0.2})`;
+    ctx.lineWidth = hctx.lineWidth = 0.6 + r() * 1.4;
+    for (const k of [ctx, hctx]) { k.beginPath(); k.moveTo(x, y); k.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len); k.stroke(); }
+  }
+  // pores et petites cavités
+  for (let i = 0; i < 2500; i++) {
+    const x = r() * size, y = r() * size, s = 0.6 + r() * 2.2;
+    ctx.fillStyle = `rgba(60,40,20,${0.1 + r() * 0.3})`; ctx.fillRect(x, y, s, s);
+    hctx.fillStyle = 'rgba(0,0,0,0.5)'; hctx.fillRect(x, y, s, s);
+  }
+  for (let i = 0; i < 9; i++) crack(ctx, hctx, r, r() * size, r() * size, 3 + r() * 6);
+  const normal = normalFromHeight(hctx, size, 3);
+  const map = finish(c, renderer);
+  const nm = finish(normal, renderer, false);
+  map.repeat.set(2, 2); nm.repeat.set(2, 2);
+  return { map, normalMap: nm };
+}

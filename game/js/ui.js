@@ -18,6 +18,11 @@ export class UI {
 
   refresh() {
     const p = this.game.player;
+    // On ne touche au DOM que si quelque chose a changé (évite des recalculs de mise en page)
+    const key = [Math.ceil(p.hp), p.maxHp, p.potions, p.gold, [...p.keys].join(), p.weapons.join(), p.weapon,
+      JSON.stringify(p.levels)].join('|');
+    if (key === this.lastKey) return;
+    this.lastKey = key;
     $('hp-fill').style.width = (100 * p.hp / p.maxHp) + '%';
     $('hp-text').textContent = `${Math.ceil(p.hp)} / ${p.maxHp}`;
     $('hp-bar').style.width = (180 + p.maxHp * 1.2) + 'px';
@@ -36,7 +41,7 @@ export class UI {
     }).join('');
   }
 
-  objective(text) { $('objective').innerHTML = text; }
+  objective(text) { if (text !== this.lastObjective) { this.lastObjective = text; $('objective').innerHTML = text; } }
 
   zoneTitle(name) {
     const el = $('zone-title');
@@ -57,6 +62,8 @@ export class UI {
   }
 
   prompt(text) {
+    if (text === this.lastPrompt) return;
+    this.lastPrompt = text;
     const el = $('prompt');
     if (!text) { el.classList.add('hidden'); return; }
     el.innerHTML = text;
@@ -70,7 +77,7 @@ export class UI {
     el.classList.add('flash');
   }
 
-  lowHealth(on) { $('lowhp').classList.toggle('on', on); }
+  lowHealth(on) { if (on !== this.lastLow) { this.lastLow = on; $('lowhp').classList.toggle('on', on); } }
 
   bossBar(show, ratio = 1, name = '') {
     this.show('boss-bar', show);

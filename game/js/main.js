@@ -12,6 +12,7 @@ import { World, toTile } from './world.js';
 import { Player, Enemy, Boss, Projectile, Rig } from './actors.js';
 import { Particles, Debris, Rings, FloatText } from './fx.js';
 import { Loot } from './loot.js';
+import { boneTextures } from './textures.js';
 import { UI } from './ui.js';
 import { Audio } from './audio.js';
 
@@ -42,7 +43,7 @@ class Input {
       this.game.onKey(e.code, e);
     });
     addEventListener('keyup', e => this.keys.delete(e.code));
-    addEventListener('blur', () => { this.keys.clear(); this.attackHeld = false; });
+    addEventListener('blur', () => { this.keys.clear(); this.attackHeld = false; this.blockMouse = false; });
     const cv = this.cv = game.renderer.domElement;
     // Caméra à la souris : le curseur est capturé au clic (pointer lock).
     addEventListener('mousemove', e => {
@@ -64,9 +65,12 @@ class Input {
         if (e.button === 0) this.dragging = true;
       }
       if (e.button === 0) this.attackHeld = true;
-      if (e.button === 2) this.flags.roll = true;
+      if (e.button === 2) this.blockMouse = true;
     });
-    addEventListener('mouseup', e => { if (e.button === 0) { this.attackHeld = false; this.dragging = false; } });
+    addEventListener('mouseup', e => {
+      if (e.button === 0) { this.attackHeld = false; this.dragging = false; }
+      if (e.button === 2) this.blockMouse = false;
+    });
     cv.addEventListener('contextmenu', e => e.preventDefault());
     cv.addEventListener('wheel', e => this.game.cycleWeapon(Math.sign(e.deltaY)), { passive: true });
   }
@@ -101,6 +105,9 @@ class Input {
     return this.dir.set(fx * z + rx * x, 0, fz * z + rz * x).normalize();
   }
 
+  // Bouclier levé : clic droit maintenu ou Maj
+  get blockHeld() { return this.blockMouse || this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'); }
+
   consume(f) { const v = !!this.flags[f]; this.flags[f] = false; return v; }
   consumeRoll() { return this.consume('roll'); }
   consumeDrink() { return this.consume('drink'); }
@@ -120,7 +127,7 @@ class Game {
 
   async init() {
     const r = this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-    r.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+    r.setPixelRatio(Math.min(devicePixelRatio, 1.25));
     r.setSize(innerWidth, innerHeight);
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -147,7 +154,7 @@ class Game {
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     this.scene.environmentIntensity = 0.22;
     // Lanterne du héros : éclaire devant lui et projette les ombres
-    const spot = this.spot = new THREE.SpotLight(0xffd9a8, 90, 40, 0.9, 0.85, 1.6);
+    const spot = this.spot = new THREE.SpotLight(0xffd9a8, 75, 40, 0.95, 0.85, 1.6);
     spot.castShadow = true;
     spot.shadow.mapSize.set(2048, 2048);
     spot.shadow.camera.near = 1;
@@ -159,7 +166,7 @@ class Game {
 
     const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: 4 });
     this.composer = new EffectComposer(r, rt);
-    this.composer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+    this.composer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     // Occlusion ambiante : ombres de contact dans les coins, au pied des murs et des personnages
     this.ao = new GTAOPass(this.scene, this.camera, innerWidth, innerHeight);
@@ -167,6 +174,24 @@ class Game {
     this.ao.blendIntensity = 0.85;
     this.ao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.4, thickness: 1.5, scale: 1.2, samples: 12 });
     this.ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
+    // Les effets lumineux (flammes, halos, particules, faisceaux) ne doivent pas assombrir le décor :
+    // sans cela, l'occlusion les traite comme des objets pleins et dessine des halos noirs autour des lumières.
+    // (la liste est reconstruite 4 fois par seconde seulement, pour la fluidité)
+    let aoList = [], aoListAge = 99;
+    const aoHidden = [];
+    this.ao.overrideVisibility = () => {
+      if ((aoListAge += 1) > 15) {
+        aoListAge = 0;
+        aoList = [];
+        this.scene.traverse(o => {
+          const m = o.material;
+          if (o.isPoints || o.isLine || o.isSprite || (m && !Array.isArray(m) && m.transparent && !m.depthWrite)) aoList.push(o);
+        });
+      }
+      aoHidden.length = 0;
+      for (const o of aoList) if (o.visible) { o.visible = false; aoHidden.push(o); }
+    };
+    this.ao.restoreVisibility = () => { for (const o of aoHidden) o.visible = true; };
     this.composer.addPass(this.ao);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.65, 0.5, 1.0);
     this.composer.addPass(this.bloom);
@@ -200,6 +225,17 @@ class Game {
       done++;
       $('load-fill').style.width = (100 * done / ASSETS.length) + '%';
     })));
+
+    // Texture d'os réaliste sur les squelettes et les ossements du décor
+    const bt = boneTextures(r);
+    for (const n of ['skeleton', 'bones']) this.assets.models[n].scene.traverse(o => {
+      if (o.isMesh && o.material.name === 'Os') {
+        Object.assign(o.material, { map: bt.map, normalMap: bt.normalMap, roughness: 0.62 });
+        o.material.color.setRGB(0.78, 0.74, 0.66);
+        o.material.normalScale.set(0.7, 0.7);
+        o.material.needsUpdate = true;
+      }
+    });
 
     this.audio = new Audio();
     this.particles = new Particles(this.scene, 4000, true);
@@ -820,8 +856,8 @@ class Game {
     this.camera.position.y += (Math.random() - 0.5) * s;
     this.camera.lookAt(this.camPos.x + fx * cp, this.camPos.y - sp + (this.camGoal ? 0.15 : 0), this.camPos.z + fz * cp);
     // Lanterne : derrière et au-dessus du héros, éclaire la direction regardée
-    this.spot.position.set(p.pos.x - fx * 1.2, 11, p.pos.z - fz * 1.2);
-    this.spot.target.position.set(p.pos.x + fx * 6, 0, p.pos.z + fz * 6);
+    this.spot.position.set(p.pos.x + fx * 2.5, 10, p.pos.z + fz * 2.5);
+    this.spot.target.position.set(p.pos.x + fx * 9, 0, p.pos.z + fz * 9);
   }
 
   // Écran titre : lent travelling circulaire dans la grande salle de la crypte
