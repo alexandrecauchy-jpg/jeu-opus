@@ -1,7 +1,7 @@
 // Données du jeu : armes, ennemis, carte du donjon et histoire.
 
 export const TILE = 4;          // taille d'une case en unités 3D
-export const WALL_H = 4.5;
+export const WALL_H = 6;
 
 export const RARITY = {
   commune: { label: 'Commune', color: '#c9c9c9' },

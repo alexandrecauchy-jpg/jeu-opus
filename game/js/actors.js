@@ -66,7 +66,7 @@ export class Rig {
     return obj;
   }
 
-  play(name, { loop = true, fade = 0.15, speed = 1, restart = false } = {}) {
+  play(name, { loop = true, fade = 0.22, speed = 1, restart = false } = {}) {
     let a = this.actions[name];
     if (!a) a = this.actions[name] = this.mixer.clipAction(this.clips[name]);
     a.timeScale = speed;
@@ -226,8 +226,7 @@ export class Player {
     this.atkDur = this.rig.duration(clip) / speed;
     this.hitT = this.atkDur * (clip === 'Attack' ? 0.46 : 0.42);
     this.rig.play(clip, { loop: false, fade: 0.06, speed, restart: true });
-    const aim = this.game.input.aimYaw(this.pos);
-    if (aim !== null) this.yaw = aim;
+    this.aimYaw = this.game.attackYaw();
     this.game.audio.play(w.speed < 0.85 ? 'heavySwing' : 'swing');
   }
 
@@ -316,6 +315,8 @@ export class Player {
         break;
       }
       case 'attack': {
+        // pivote rapidement (mais en douceur) vers la cible du coup
+        if (this.t < this.hitT) this.yaw = turnTo(this.yaw, this.aimYaw, dt * 28);
         const lunge = this.t < this.atkDur * 0.4 ? 3.2 : 0;
         _v.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
         desired = _v2.copy(_v).multiplyScalar(lunge).addScaledVector(mv, 1.8);
@@ -346,6 +347,7 @@ export class Player {
         if (mv.lengthSq() > 0) {
           this.yaw = turnTo(this.yaw, Math.atan2(mv.x, mv.z), dt * 14);
           this.rig.play('Run', { speed: 1.15 });
+          this.rig.current.timeScale = Math.max(0.55, Math.min(1.2, this.vel.length() / speed * 1.15));
         } else this.rig.play('Idle', { fade: 0.2 });
         if (inp.consumeRoll() && this.rollCd <= 0) {
           this.startRoll(mv.lengthSq() > 0 ? mv : new V(Math.sin(this.yaw), 0, Math.cos(this.yaw)));

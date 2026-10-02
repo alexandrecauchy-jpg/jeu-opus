@@ -24,7 +24,8 @@ Ces scripts ont besoin de Python, puis ouvrent `http://localhost:8000`. Sans Pyt
 | Action | Touches |
 |---|---|
 | Se déplacer | `Z Q S D` (AZERTY), `W A S D` (QWERTY) ou flèches |
-| Attaquer | Clic gauche (le coup part vers la souris ; maintenir pour enchaîner un combo de 3 coups) |
+| Caméra (3e personne) | Souris (cliquez dans le jeu pour la capturer, Échap pour la libérer) |
+| Attaquer | Clic gauche, maintenir pour un combo de 3 coups. Le coup part vers la touche de direction tenue (ex. S + clic = derrière), sinon vers l'ennemi le plus proche, de tous les côtés |
 | Roulade (invulnérable) | `Espace` ou clic droit |
 | Boire une potion | `F` |
 | Interagir (coffres, armes, parchemins) | `E` |

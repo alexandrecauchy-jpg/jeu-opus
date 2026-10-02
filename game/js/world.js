@@ -142,6 +142,33 @@ export class World {
     this.wallIndex = new Map();
     this.walls.forEach((w, i) => { this.wallIndex.set(this.idx(w.tx, w.ty), i); this.setWallMatrix(i); });
     this.scene.add(mesh);
+    this.buildCeiling(tex);
+  }
+
+  // Voûte de pierre au-dessus des salles (visible avec la caméra à la troisième personne).
+  // Elle ne projette pas d'ombre, pour laisser passer la lumière de la lanterne.
+  buildCeiling(tex) {
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex.map, normalMap: tex.normalMap, color: 0x6a625a, roughness: 0.95, side: THREE.DoubleSide,
+    });
+    const geo = new THREE.PlaneGeometry(TILE, TILE);
+    geo.rotateX(Math.PI / 2);
+    const tiles = [];
+    for (let y = 0; y < MAP_H; y++) for (let x = 0; x < MAP_W; x++) if (this.isFloor(x, y)) tiles.push([x, y]);
+    const ceil = new THREE.InstancedMesh(geo, mat, tiles.length);
+    const m = new THREE.Matrix4();
+    tiles.forEach(([x, y], i) => { m.makeTranslation(tileCenter(x), WALL_H, tileCenter(y)); ceil.setMatrixAt(i, m); });
+    ceil.castShadow = false;
+    ceil.receiveShadow = false;
+    this.scene.add(ceil);
+    // Poutres de bois tous les deux carreaux, pour rythmer la voûte
+    const beamMat = new THREE.MeshStandardMaterial({ color: 0x2a1a10, roughness: 0.9 });
+    const beamGeo = new THREE.BoxGeometry(TILE, 0.35, 0.35);
+    const beams = [];
+    for (let y = 0; y < MAP_H; y += 2) for (let x = 0; x < MAP_W; x++) if (this.isFloor(x, y)) beams.push([x, y]);
+    const bm = new THREE.InstancedMesh(beamGeo, beamMat, beams.length);
+    beams.forEach(([x, y], i) => { m.makeTranslation(tileCenter(x), WALL_H - 0.18, y * TILE); bm.setMatrixAt(i, m); });
+    this.scene.add(bm);
   }
 
   setWallMatrix(i) {
@@ -206,7 +233,7 @@ export class World {
       if (dir === 'N') { z = cz - TILE / 2 + 0.12; rot = 0; wall = [tx, ty - 1]; }
       if (dir === 'W') { x = cx - TILE / 2 + 0.12; rot = Math.PI / 2; wall = [tx - 1, ty]; }
       if (dir === 'E') { x = cx + TILE / 2 - 0.12; rot = -Math.PI / 2; wall = [tx + 1, ty]; }
-      t.position.set(x, 2.5, z);
+      t.position.set(x, 3.0, z);
       t.rotation.y = rot;
       this.scene.add(t);
       const off = new THREE.Vector3(0, 0.62, 0.32).applyAxisAngle(new THREE.Vector3(0, 1, 0), rot);
@@ -268,7 +295,7 @@ export class World {
       const xs = g.tiles.map(t => tileCenter(t[0])), zs = g.tiles.map(t => tileCenter(t[1]));
       const cx = xs.reduce((a, b) => a + b) / xs.length, cz = zs.reduce((a, b) => a + b) / zs.length;
       const vertical = g.tiles[0][0] === g.tiles[1][0];
-      mesh.scale.set((TILE * 2) / 3.3, 1.42, 1.3);
+      mesh.scale.set((TILE * 2) / 3.3, WALL_H / 3.2, 1.3);
       mesh.rotation.y = vertical ? Math.PI / 2 : 0;
       mesh.position.set(cx, g.startOpen ? WALL_H - 0.3 : 0, cz);
       mesh.traverse(o => { if (o.isMesh) { o.castShadow = true; } });
@@ -329,9 +356,9 @@ export class World {
     const rnd = ((tx * 928371 + ty * 12377) % 1000) / 1000;
     switch (type) {
       case 'pillar': {
-        const m = this.placeModel('pillar', wx, wz, 1.25);
+        const m = this.placeModel('pillar', wx, wz, 1.5);
         this.makeFadeable(m, wx, wz);
-        this.obstacles.push({ x: wx, z: wz, r: 0.8 });
+        this.obstacles.push({ x: wx, z: wz, r: 0.95 });
         break;
       }
       case 'barrel': this.placeModel('barrel', wx, wz, 1.35, rnd * 6); this.obstacles.push({ x: wx, z: wz, r: 0.55 }); break;
@@ -430,10 +457,16 @@ export class World {
     this.fadeables.push({ m, x, z, mats, o: 1 });
   }
 
-  updateProps(dt, p) {
+  updateProps(dt, p, cam) {
     for (const f of this.fadeables) {
-      const dz = f.z - p.z, dx = Math.abs(f.x - p.x);
-      const target = dz > 0.5 && dz < 13 && dx < 5 ? 0.22 : 1;
+      // un pilier devient transparent s'il se trouve entre la caméra et le héros
+      let target = 1;
+      if (cam) {
+        const sx = cam.x - p.x, sz = cam.z - p.z, len2 = sx * sx + sz * sz || 1;
+        const t = Math.max(0, Math.min(1, ((f.x - p.x) * sx + (f.z - p.z) * sz) / len2));
+        const d = Math.hypot(p.x + sx * t - f.x, p.z + sz * t - f.z);
+        if (t > 0.05 && d < 1.6) target = 0.18;
+      }
       if (f.o !== target) {
         f.o += Math.sign(target - f.o) * dt * 3;
         if (Math.abs(target - f.o) < 0.05) f.o = target;

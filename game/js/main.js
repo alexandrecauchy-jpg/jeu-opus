@@ -5,7 +5,9 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { TILE, ENTITIES, PLAYER_START, WEAPONS, WEAPON_ORDER, STORY, NOTES, ZONE_INFO } from './data.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { TILE, WALL_H, ENTITIES, PLAYER_START, WEAPONS, WEAPON_ORDER, STORY, NOTES, ZONE_INFO } from './data.js';
 import { World, toTile } from './world.js';
 import { Player, Enemy, Boss, Projectile, Rig } from './actors.js';
 import { Particles, Debris, Rings, FloatText } from './fx.js';
@@ -28,13 +30,12 @@ class Input {
   constructor(game) {
     this.game = game;
     this.keys = new Set();
-    this.mouse = new THREE.Vector2();
     this.attackHeld = false;
     this.flags = {};
-    this.ray = new THREE.Raycaster();
-    this.plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.0);
     this.dir = new THREE.Vector3();
-    this.mouseSeen = false;
+    this.locked = false;
+    this.lookX = 0;          // mouvement souris accumulé (caméra)
+    this.lookY = 0;
     addEventListener('keydown', e => {
       if (e.repeat) return;
       this.keys.add(e.code);
@@ -42,37 +43,62 @@ class Input {
     });
     addEventListener('keyup', e => this.keys.delete(e.code));
     addEventListener('blur', () => { this.keys.clear(); this.attackHeld = false; });
-    const cv = game.renderer.domElement;
+    const cv = this.cv = game.renderer.domElement;
+    // Caméra à la souris : le curseur est capturé au clic (pointer lock).
     addEventListener('mousemove', e => {
-      this.mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
-      this.mouseSeen = true;
+      if (this.locked) { this.lookX += e.movementX; this.lookY += e.movementY; }
+      else if (this.dragging) { this.lookX += e.movementX; this.lookY += e.movementY; }
+    });
+    document.addEventListener('pointerlockchange', () => {
+      this.locked = document.pointerLockElement === cv;
+      if (!this.locked && this.game.state === 'play') { this.unlockAt = performance.now(); this.game.togglePause(true); }
     });
     cv.addEventListener('mousedown', e => {
-      this.game.audio.resume();
+      const g = this.game;
+      g.audio.resume();
+      if (g.state === 'dialog' || g.state === 'note') { if (g.ui.advance) g.ui.advance(); return; }
+      if (g.state !== 'play') return;
+      if (!this.locked) {
+        this.requestLock();
+        // Sans pointer lock (navigateur qui le refuse) : glisser pour tourner la caméra
+        if (e.button === 0) this.dragging = true;
+      }
       if (e.button === 0) this.attackHeld = true;
       if (e.button === 2) this.flags.roll = true;
     });
-    addEventListener('mouseup', e => { if (e.button === 0) this.attackHeld = false; });
+    addEventListener('mouseup', e => { if (e.button === 0) { this.attackHeld = false; this.dragging = false; } });
     cv.addEventListener('contextmenu', e => e.preventDefault());
     cv.addEventListener('wheel', e => this.game.cycleWeapon(Math.sign(e.deltaY)), { passive: true });
   }
 
+  requestLock() {
+    try {
+      const p = this.cv.requestPointerLock();
+      if (p && p.catch) p.catch(() => {});
+    } catch (err) { /* pointer lock indisponible : la caméra suit le héros */ }
+  }
+
+  releaseLock() { if (document.pointerLockElement) document.exitPointerLock(); }
+
+  consumeLook() {
+    const r = [this.lookX, this.lookY];
+    this.lookX = this.lookY = 0;
+    return r;
+  }
+
+  // Direction de déplacement dans le monde, relative à l'orientation de la caméra.
   moveDir() {
     const k = this.keys;
     let x = 0, z = 0;
-    if (k.has('KeyW') || k.has('ArrowUp')) z -= 1;
-    if (k.has('KeyS') || k.has('ArrowDown')) z += 1;
+    if (k.has('KeyW') || k.has('ArrowUp')) z += 1;
+    if (k.has('KeyS') || k.has('ArrowDown')) z -= 1;
     if (k.has('KeyA') || k.has('ArrowLeft')) x -= 1;
     if (k.has('KeyD') || k.has('ArrowRight')) x += 1;
-    return this.dir.set(x, 0, z).normalize();
-  }
-
-  aimYaw(from) {
-    if (!this.mouseSeen) return null;
-    this.ray.setFromCamera(this.mouse, this.game.camera);
-    const hit = this.ray.ray.intersectPlane(this.plane, _v);
-    if (!hit) return null;
-    return Math.atan2(hit.x - from.x, hit.z - from.z);
+    if (!x && !z) return this.dir.set(0, 0, 0);
+    const a = this.game.camYaw;
+    const fx = Math.sin(a), fz = Math.cos(a);     // avant
+    const rx = -Math.cos(a), rz = Math.sin(a);    // droite
+    return this.dir.set(fx * z + rx * x, 0, fz * z + rz * x).normalize();
   }
 
   consume(f) { const v = !!this.flags[f]; this.flags[f] = false; return v; }
@@ -105,28 +131,48 @@ class Game {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x030305);
     this.scene.fog = new THREE.FogExp2(0x050408, 0.016);
-    this.camera = new THREE.PerspectiveCamera(46, innerWidth / innerHeight, 0.5, 200);
-    this.camOffset = new THREE.Vector3(0, 14, 10.5);
+    // Caméra à la troisième personne, derrière le héros
+    this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 160);
+    this.camYaw = Math.PI;       // direction regardée (0 = +z)
+    this.camPitch = 0.28;        // inclinaison vers le bas (radians)
+    this.camDist = 5.6;          // distance voulue derrière le héros
+    this.camCurDist = 5.6;
     this.camTarget = new THREE.Vector3();
+    this.camPos = new THREE.Vector3();
 
-    this.scene.add(new THREE.AmbientLight(0x6a78b0, 0.55));
-    this.scene.add(new THREE.HemisphereLight(0x8a96c8, 0x2a1a10, 0.6));
-    const spot = this.spot = new THREE.SpotLight(0xffe2b8, 190, 45, 0.85, 0.8, 1.5);
+    this.scene.add(new THREE.AmbientLight(0x6a78b0, 0.32));
+    this.scene.add(new THREE.HemisphereLight(0x8a96c8, 0x2a1a10, 0.45));
+    // Reflets doux sur le métal (armures, armes) grâce à une carte d'environnement
+    const pmrem = new THREE.PMREMGenerator(r);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environmentIntensity = 0.22;
+    // Lanterne du héros : éclaire devant lui et projette les ombres
+    const spot = this.spot = new THREE.SpotLight(0xffd9a8, 90, 40, 0.9, 0.85, 1.6);
     spot.castShadow = true;
     spot.shadow.mapSize.set(2048, 2048);
-    spot.shadow.camera.near = 3;
+    spot.shadow.camera.near = 1;
     spot.shadow.camera.far = 40;
     spot.shadow.bias = -0.0004;
     spot.shadow.normalBias = 0.04;
+    spot.shadow.radius = 3;
     this.scene.add(spot, spot.target);
 
     const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: 4 });
     this.composer = new EffectComposer(r, rt);
     this.composer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.7, 0.5, 1.0);
+    // Occlusion ambiante : ombres de contact dans les coins, au pied des murs et des personnages
+    this.ao = new GTAOPass(this.scene, this.camera, innerWidth, innerHeight);
+    this.ao.output = GTAOPass.OUTPUT.Default;
+    this.ao.blendIntensity = 0.85;
+    this.ao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.4, thickness: 1.5, scale: 1.2, samples: 12 });
+    this.ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
+    this.composer.addPass(this.ao);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.65, 0.5, 1.0);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
+    this.fpsAvg = 60;
+    this.slowTime = 0;
 
     addEventListener('resize', () => {
       this.camera.aspect = innerWidth / innerHeight;
@@ -253,9 +299,13 @@ class Game {
     this.championSeen = false;
     this.stats = { time: 0, kills: 0, chests: 0, chestsTotal: this.chestsTotal, gold: 0, deaths: 0, weapons: 1, damageTaken: 0 };
     this.timeScale = 1;
-    this.camOffset.set(0, 14, 10.5);
+    this.camYaw = Math.PI;
+    this.camPitch = 0.28;
+    this.camCurDist = this.camDist;
+    this.camTarget.set(this.player.pos.x, 2.35, this.player.pos.z);
     this.camGoal = 0;
     this.camFocus = null;
+    this.input.requestLock();
     this.ui.bossBar(false);
     this.ui.refresh();
     this.state = 'play';
@@ -303,6 +353,8 @@ class Game {
     }
     if (this.state === 'title' && (code === 'Enter' || code === 'Space')) { this.newGame(); return; }
     if (code === 'Escape' || code === 'KeyP') {
+      // Échap libère déjà la souris (et met en pause) : on évite de basculer deux fois
+      if (performance.now() - (this.input.unlockAt || 0) < 400) return;
       if (this.state === 'play' || this.state === 'pause') this.togglePause(this.state === 'play');
       return;
     }
@@ -323,6 +375,7 @@ class Game {
     this.state = on ? 'pause' : 'play';
     this.ui.show('pause-menu', on);
     this.input.attackHeld = false;
+    if (on) this.input.releaseLock(); else this.input.requestLock();
   }
 
   switchWeapon(id) {
@@ -498,7 +551,7 @@ class Game {
           this.particles.burst(p.pos.x + Math.cos(a) * 3, 3 + Math.random() * 2, p.pos.z + Math.sin(a) * 3, 40,
             { spread: 6, vel: [0, 1, 0], color: [[1, 0.8, 0.3], [0.5, 0.8, 1], [1, 0.5, 0.8]][i % 3], size: 0.35, life: 1.4, gravity: 2 });
         });
-        this.later(4.5, () => { this.state = 'victory'; this.ui.show('hud', false); this.ui.victory(this.stats); });
+        this.later(4.5, () => { this.state = 'victory'; this.input.releaseLock(); this.ui.show('hud', false); this.ui.victory(this.stats); });
       });
     }
   }
@@ -508,6 +561,7 @@ class Game {
     this.input.attackHeld = false;
     this.later(2.2, () => {
       this.state = 'dead';
+      this.input.releaseLock();
       this.ui.show('death-screen');
     });
   }
@@ -538,6 +592,7 @@ class Game {
       this.audio.startMusic('ambient');
     }
     this.state = 'play';
+    this.input.requestLock();
     this.ui.refresh();
   }
 
@@ -574,7 +629,7 @@ class Game {
       this.audio.startMusic('boss');
       this.ui.zoneTitle(ZONE_INFO[5].name);
       this.updateObjective();
-      this.camFocus = { x: (p.pos.x + this.boss.pos.x) / 2, z: (p.pos.z + this.boss.pos.z) / 2 };
+      this.camFocus = { x: this.boss.pos.x, z: this.boss.pos.z };
       this.cutscene(async () => {
         await this.ui.dialog(this.bossIntroSeen ? [{ who: 'Morvath', text: 'Encore toi ? Tes os rejoindront les autres !' }] : STORY.boss);
         this.bossIntroSeen = true;
@@ -627,7 +682,9 @@ class Game {
 
   // -------------------------------------------------------------------------
   frame() {
-    let dt = Math.min(0.05, this.clock.getDelta());
+    const rawDt = this.clock.getDelta();
+    this.watchPerformance(rawDt);
+    let dt = Math.min(0.05, rawDt);
     const playing = this.state === 'play';
     if (playing) {
       this.stats.time += dt;
@@ -669,9 +726,9 @@ class Game {
     this.projectiles = this.projectiles.filter(pr => { const keep = pr.update(dt); if (!keep) pr.dispose(); return keep; });
     this.loot.update(dt);
     this.world.updateGates(dt);
-    this.world.updateWalls(dt, p.pos.x, p.pos.z);
     this.world.updateLights(dt, p.pos);
-    this.world.updateProps(dt, p.pos);
+    this.world.updateProps(dt, p.pos, this.camPos);
+    this.updateDust(dt);
     this.world.reveal(p.pos.x, p.pos.z);
     this.particles.update(dt);
     this.debris.update(dt);
@@ -693,30 +750,119 @@ class Game {
     if (this.uiTimer <= 0) { this.uiTimer = 0.1; this.ui.refresh(); }
   }
 
-  updateCamera(dt) {
-    const p = this.player.pos;
-    if (this.camGoal) this.camOffset.lerp(_v.set(0, 6, 8), Math.min(1, dt * 1.2));
-    const f = this.camFocus || p;
-    if (this.state !== 'title') this.camTarget.lerp(_v.set(f.x, 0.8, f.z + 3), Math.min(1, dt * (this.camFocus ? 2.5 : 8)));
-    this.camera.position.copy(this.camTarget).add(this.camOffset);
-    this.shakeAmt = Math.max(0, this.shakeAmt - dt * 2.5);
-    const s = this.shakeAmt * this.shakeAmt * 0.6;
-    this.camera.position.x += (Math.random() - 0.5) * s;
-    this.camera.position.y += (Math.random() - 0.5) * s;
-    this.camera.lookAt(this.camTarget.x, this.camTarget.y + (this.camGoal ? 1 : 0), this.camTarget.z);
-    const c = this.camTarget;
-    this.spot.position.set(c.x + 1.5, 13, c.z + 5);
-    this.spot.target.position.set(c.x, 0, c.z);
+  // Direction d'une attaque : touche de direction tenue, sinon l'ennemi le plus proche
+  // (de tous les côtés), sinon devant la caméra. Petite aide à la visée vers les ennemis.
+  attackYaw() {
+    const p = this.player, w = WEAPONS[p.weapon], mv = this.input.moveDir();
+    const base = mv.lengthSq() > 0 ? Math.atan2(mv.x, mv.z) : null;
+    let best = null, bestScore = Infinity;
+    for (const e of this.enemies) {
+      if (!e.targetable) continue;
+      const dx = e.pos.x - p.pos.x, dz = e.pos.z - p.pos.z, d = Math.hypot(dx, dz);
+      if (d > w.range + e.radius + 2.5) continue;
+      const a = Math.atan2(dx, dz);
+      let score = d;
+      if (base !== null) {
+        const da = Math.abs(Math.atan2(Math.sin(a - base), Math.cos(a - base)));
+        if (da > 1.2) continue;
+        score += da * 3;
+      }
+      if (score < bestScore) { bestScore = score; best = a; }
+    }
+    return best ?? base ?? this.camYaw;
   }
 
+  // Caméra à la troisième personne : derrière l'épaule du héros, ne traverse jamais les murs.
+  updateCamera(dt) {
+    if (this.state === 'title') return;
+    const p = this.player;
+    const playing = this.state === 'play';
+    const [lx, ly] = this.input.consumeLook();
+    if (playing && !this.camGoal && !this.camFocus) {
+      this.camYaw -= lx * 0.0024;
+      this.camPitch = Math.max(-0.12, Math.min(0.85, this.camPitch + ly * 0.002));
+    }
+    let wantDist = this.camDist, wantPitch = null;
+    const turnTowards = (yaw, speed) => {
+      const d = Math.atan2(Math.sin(yaw - this.camYaw), Math.cos(yaw - this.camYaw));
+      this.camYaw += d * Math.min(1, dt * speed);
+    };
+    if (this.camGoal) {
+      turnTowards(p.yaw + Math.PI, 1.5);       // fin : on regarde le héros de face
+      wantDist = 4.2; wantPitch = 0.1;
+    } else if (this.camFocus) {
+      turnTowards(Math.atan2(this.camFocus.x - p.pos.x, this.camFocus.z - p.pos.z), 2.5);
+      wantPitch = 0.22;
+    }
+    if (wantPitch !== null) this.camPitch += (wantPitch - this.camPitch) * Math.min(1, dt * 2);
+
+    // Point pivot (au-dessus de l'épaule droite), lissé pour éviter les à-coups
+    const fx = Math.sin(this.camYaw), fz = Math.cos(this.camYaw);
+    const rx = -fz, rz = fx;
+    const shoulder = this.camGoal ? 0 : 0.55;
+    _v.set(p.pos.x + rx * shoulder, 2.35, p.pos.z + rz * shoulder);
+    this.camTarget.lerp(_v, Math.min(1, dt * 14));
+    const cp = Math.cos(this.camPitch), sp = Math.sin(this.camPitch);
+    // Collision avec les murs : on avance le long du rayon pivot → caméra
+    let allowed = wantDist;
+    for (let d = 0.3; d <= wantDist + 0.35; d += 0.2) {
+      const x = this.camTarget.x - fx * cp * d, y = this.camTarget.y + sp * d, z = this.camTarget.z - fz * cp * d;
+      if (!this.world.walkableAt(x, z) || y > WALL_H - 0.3) { allowed = Math.max(0.6, d - 0.45); break; }
+    }
+    if (allowed < this.camCurDist) this.camCurDist = allowed;
+    else this.camCurDist += (allowed - this.camCurDist) * Math.min(1, dt * 3);
+    const d = this.camCurDist;
+    this.camPos.set(this.camTarget.x - fx * cp * d, this.camTarget.y + sp * d, this.camTarget.z - fz * cp * d);
+    this.camera.position.copy(this.camPos);
+    this.shakeAmt = Math.max(0, this.shakeAmt - dt * 2.5);
+    const s = this.shakeAmt * this.shakeAmt * 0.25;
+    this.camera.position.x += (Math.random() - 0.5) * s;
+    this.camera.position.y += (Math.random() - 0.5) * s;
+    this.camera.lookAt(this.camPos.x + fx * cp, this.camPos.y - sp + (this.camGoal ? 0.15 : 0), this.camPos.z + fz * cp);
+    // Lanterne : derrière et au-dessus du héros, éclaire la direction regardée
+    this.spot.position.set(p.pos.x - fx * 1.2, 11, p.pos.z - fz * 1.2);
+    this.spot.target.position.set(p.pos.x + fx * 6, 0, p.pos.z + fz * 6);
+  }
+
+  // Écran titre : lent travelling circulaire dans la grande salle de la crypte
   titleCam(dt) {
     this.time += dt;
-    const t = this.time * 0.1;
-    const cx = 27 * TILE, cz = 28 * TILE;
-    this.camTarget.set(cx + Math.sin(t) * 10, 0.8, cz + Math.cos(t * 0.7) * 6);
-    this.world.updateLights(dt, this.camTarget);
+    const t = this.time * 0.08;
+    const cx = 24 * TILE, cz = 25 * TILE;
+    this.camera.position.set(cx + Math.sin(t) * 6, 3.8, 32.5 * TILE);
+    this.camera.lookAt(cx + Math.sin(t * 0.7) * 4, 1.8, cz);
+    this.world.updateLights(dt, this.camera.position);
+    this.spot.position.set(cx, 9, cz);
+    this.spot.target.position.set(cx, 0, cz);
     this.particles.update(dt);
-    this.camOffset.set(Math.sin(t) * 8, 15, 12);
+  }
+
+  // Surveille la fluidité : si l'image ralentit, on désactive les effets les plus lourds.
+  watchPerformance(rawDt) {
+    if (rawDt <= 0) return;
+    this.fpsAvg += (1 / rawDt - this.fpsAvg) * 0.05;
+    if (this.fpsAvg < 38) this.slowTime += rawDt; else this.slowTime = Math.max(0, this.slowTime - rawDt);
+    if (this.slowTime > 4) {
+      this.slowTime = 0;
+      if (this.ao.enabled) this.ao.enabled = false;
+      else if (this.renderer.getPixelRatio() > 1) { this.renderer.setPixelRatio(1); this.composer.setPixelRatio(1); this.composer.setSize(innerWidth, innerHeight); }
+    }
+  }
+
+  // Poussière en suspension autour du héros (ambiance)
+  updateDust(dt) {
+    const p = this.player.pos;
+    this.dustAcc = (this.dustAcc || 0) + dt * 14;
+    while (this.dustAcc > 1) {
+      this.dustAcc--;
+      const a = Math.random() * Math.PI * 2, r = 1 + Math.random() * 9;
+      const x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+      if (!this.world.walkableAt(x, z)) continue;
+      this.particles.emit(x, 0.4 + Math.random() * 4, z, {
+        vel: [(Math.random() - 0.5) * 0.25, 0.05, (Math.random() - 0.5) * 0.25], spread: 0.05,
+        color: [1, 0.85, 0.6], size: 0.07, sizeEnd: 0.07, life: 4.5, alpha: 0.35,
+      });
+    }
   }
 }
 
