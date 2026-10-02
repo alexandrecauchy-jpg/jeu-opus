@@ -34,6 +34,19 @@ Ces scripts ont besoin de Python, puis ouvrent `http://localhost:8000`. Sans Pyt
 | Carte | `M` |
 | Pause | `Échap` |
 
+### Sur iPad (commandes tactiles)
+
+Au menu, choisissez **📱 Tactile (iPad)** (le mode est détecté automatiquement sur tablette et se change aussi dans le menu Pause) :
+
+| Action | Geste |
+|---|---|
+| Marcher | Posez le pouce n'importe où sur la moitié gauche et glissez (joystick) |
+| Caméra | Glissez un doigt sur la moitié droite de l'écran |
+| Frapper | Bouton ⚔️ (maintenir = combo) |
+| Bouclier | Bouton 🛡️ maintenu |
+| Roulade, potion, utiliser, changer d'arme | Boutons 🌀 🧪 ✋ 🔁 (on peut aussi toucher une arme en bas ou le message d'action) |
+| Pause | Bouton ⏸ en haut |
+
 ## Contenu
 
 - **5 zones** : les Caves, la Crypte, l'Ossuaire, les Salles du Roi et le Trône des Os. Les zones sont séparées par des herses qui s'ouvrent quand on a tué tous les squelettes ou trouvé la bonne clé.

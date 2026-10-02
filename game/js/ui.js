@@ -35,7 +35,7 @@ export class UI {
     const list = WEAPON_ORDER.filter(id => p.weapons.includes(id));
     $('weapons').innerHTML = list.map((id, i) => {
       const w = WEAPONS[id], r = RARITY[w.rarity], lv = p.levels[id] || 0;
-      return `<div class="wslot ${id === p.weapon ? 'active' : ''}" style="--rc:${r.color}">
+      return `<div class="wslot ${id === p.weapon ? 'active' : ''}" data-weapon="${id}" style="--rc:${r.color}">
         <span class="wkey">${i + 1}</span><span class="wname">${w.name}${lv ? ' +' + lv : ''}</span>
         <span class="wstat">${r.label} · ${Math.round(w.dmg * (1 + 0.15 * lv))} dgt</span></div>`;
     }).join('');
@@ -62,6 +62,7 @@ export class UI {
   }
 
   prompt(text) {
+    if (text && this.game.input.mode === 'touch') text = text.replace('<kbd>E</kbd>', '✋');
     if (text === this.lastPrompt) return;
     this.lastPrompt = text;
     const el = $('prompt');

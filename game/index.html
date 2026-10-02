@@ -145,6 +145,49 @@
   .vol { margin: 18px 0; font-family: 'Cinzel', serif; }
   .story-end { max-width: 640px; margin: 0 auto 22px; font-size: 20px; font-style: italic; }
 
+
+  /* ---------- Choix des contrôles ---------- */
+  .mode-pick { display: inline-flex; gap: 0; margin: 0 0 18px; border: 1px solid var(--gold-dim); border-radius: 4px; overflow: hidden; }
+  .mode-pick button { pointer-events: auto; cursor: pointer; font-family: 'Cinzel', serif; font-size: 16px; padding: 10px 18px;
+    background: rgba(0,0,0,.55); color: var(--ink); border: 0; }
+  .mode-pick button + button { border-left: 1px solid var(--gold-dim); }
+  .mode-pick button.on { background: linear-gradient(#f3c86a, #b8842f); color: #1a0f05; font-weight: 700; }
+  .mode-label { display: block; font-family: 'Cinzel', serif; font-size: 13px; color: var(--gold-dim); letter-spacing: .12em; margin-bottom: 6px; }
+  body.touch .controls.kbm, body:not(.touch) .controls.touch-help { display: none; }
+
+  /* ---------- Commandes tactiles (iPad) ---------- */
+  #touch-ui { position: fixed; inset: 0; z-index: 10; touch-action: none; -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none; display: none; }
+  body.touch.playing #touch-ui { display: block; }
+  body.touch #controls-hint { display: none; }
+  body.touch #game canvas { touch-action: none; }
+  #t-stick { position: absolute; width: 140px; height: 140px; margin: -70px 0 0 -70px; border-radius: 50%;
+    border: 2px solid rgba(232,184,90,.45); background: radial-gradient(rgba(0,0,0,.15), rgba(0,0,0,.45)); display: none; pointer-events: none; }
+  #t-knob { position: absolute; left: 50%; top: 50%; width: 62px; height: 62px; margin: -31px 0 0 -31px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #f3d18a, #9a6a28); box-shadow: 0 4px 14px rgba(0,0,0,.6); }
+  #t-stick-hint { position: absolute; left: 6%; bottom: 14%; width: 120px; height: 120px; border-radius: 50%;
+    border: 2px dashed rgba(232,184,90,.3); display: grid; place-items: center; font-family: 'Cinzel', serif; font-size: 12px;
+    color: rgba(241,230,207,.5); text-align: center; pointer-events: none; }
+  .tb { position: absolute; border-radius: 50%; display: grid; place-items: center; text-align: center; line-height: 1;
+    background: radial-gradient(circle at 35% 30%, rgba(60,44,30,.9), rgba(14,10,8,.88)); border: 2px solid var(--gold-dim);
+    color: var(--ink); font-family: 'Cinzel', serif; font-size: 11px; box-shadow: 0 4px 14px rgba(0,0,0,.6); }
+  .tb span { display: block; font-size: 28px; margin-bottom: 2px; }
+  .tb.down { background: radial-gradient(circle at 35% 30%, #f3c86a, #8a5a1a); color: #1a0f05; transform: scale(.94); }
+  #tb-attack { width: 104px; height: 104px; right: 40px; bottom: 44px; border-color: var(--gold); }
+  #tb-attack span { font-size: 40px; }
+  #tb-block { width: 78px; height: 78px; right: 160px; bottom: 30px; }
+  #tb-roll { width: 74px; height: 74px; right: 60px; bottom: 164px; }
+  #tb-use { width: 66px; height: 66px; right: 158px; bottom: 128px; }
+  #tb-potion { width: 62px; height: 62px; right: 152px; bottom: 214px; }
+  #tb-weapon { width: 62px; height: 62px; right: 64px; bottom: 254px; }
+  #tb-pause { width: 50px; height: 50px; right: 226px; top: 16px; }
+  #tb-pause span { font-size: 20px; margin: 0; }
+  body.touch #hud { z-index: 11; }
+  body.touch .kbm-only { display: none; }
+  body.touch #weapons { bottom: 10px; left: 38%; }
+  body.touch.playing .wslot { pointer-events: auto; cursor: pointer; }
+  body.touch.playing #prompt { pointer-events: auto; cursor: pointer; bottom: 150px; }
+  @media (max-width: 900px) { #tb-pause { right: 16px; top: 74px; } }
   @media (max-width: 700px) {
     #controls-hint, #minimap-wrap { display: none; }
     .wslot { min-width: 0; } .wstat { display: none; }
@@ -167,7 +210,7 @@
   <div id="vitals">
     <div id="hp-bar"><div id="hp-fill"></div><div id="hp-text">100 / 100</div></div>
     <div id="resources">
-      <div><span class="ico">🧪</span><span id="potions">1</span> <small style="opacity:.6">(F)</small></div>
+      <div><span class="ico">🧪</span><span id="potions">1</span> <small class="kbm-only" style="opacity:.6">(F)</small></div>
       <div><span class="ico">🪙</span><span id="gold">0</span></div>
     </div>
     <div id="keys"></div>
@@ -183,6 +226,19 @@
     <kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> / <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> se déplacer · <b>Souris</b> caméra · <b>Clic gauche</b> frapper (+ direction pour viser)<br>
     <b>Clic droit</b> bouclier · <kbd>Espace</kbd> roulade · <kbd>F</kbd> potion · <kbd>E</kbd> interagir · <kbd>1</kbd>-<kbd>7</kbd> / molette armes · <kbd>Échap</kbd> pause
   </div>
+</div>
+
+
+<div id="touch-ui">
+  <div id="t-stick-hint">Glissez<br>pour<br>marcher</div>
+  <div id="t-stick"><div id="t-knob"></div></div>
+  <div class="tb" id="tb-attack" data-btn="attack"><div><span>⚔️</span>Frapper</div></div>
+  <div class="tb" id="tb-block" data-btn="block"><div><span>🛡️</span>Bouclier</div></div>
+  <div class="tb" id="tb-roll" data-btn="roll"><div><span>🌀</span>Roulade</div></div>
+  <div class="tb" id="tb-use" data-btn="use"><div><span>✋</span>Utiliser</div></div>
+  <div class="tb" id="tb-potion" data-btn="potion"><div><span>🧪</span>Potion</div></div>
+  <div class="tb" id="tb-weapon" data-btn="weapon"><div><span>🔁</span>Arme</div></div>
+  <div class="tb" id="tb-pause" data-btn="pause"><div><span>⏸</span></div></div>
 </div>
 
 <div id="dialog" class="hidden">
@@ -207,8 +263,23 @@
   <div>
     <h1>Le Donjon des Os</h1>
     <h2>Sauvez la princesse Elara</h2>
+    <span class="mode-label">Contrôles</span>
+    <div class="mode-pick" role="group" aria-label="Contrôles">
+      <button type="button" id="mode-t-kbm" data-mode="kbm">⌨️ Clavier + souris</button>
+      <button type="button" id="mode-t-touch" data-mode="touch">📱 Tactile (iPad)</button>
+    </div><br>
     <button class="btn" id="btn-start">Entrer dans le donjon</button>
-    <div class="controls">
+    <div class="controls touch-help">
+      <b>Marcher</b><span>Pouce gauche : posez-le n'importe où à gauche et glissez (joystick)</span>
+      <b>Caméra</b><span>Glissez un doigt sur la moitié droite de l'écran</span>
+      <b>⚔️ Frapper</b><span>Maintenir = combo. Vers la direction du joystick, sinon vers l'ennemi le plus proche</span>
+      <b>🛡️ Bouclier</b><span>Maintenir : pare les flèches et les coups de face</span>
+      <b>🌀 Roulade</b><span>Esquive invulnérable</span>
+      <b>✋ Utiliser</b><span>Coffres, armes, parchemins (ou touchez le message)</span>
+      <b>🔁 Arme</b><span>Arme suivante (ou touchez une arme en bas)</span>
+      <b>Conseil</b><span>Tenez l'iPad à l'horizontale</span>
+    </div>
+    <div class="controls kbm">
       <b>Déplacement</b><span><kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd>, <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> ou flèches</span>
       <b>Caméra</b><span>Souris (cliquez dans le jeu pour la capturer)</span>
       <b>Attaquer</b><span>Clic gauche, maintenir = combo. Vers la touche de direction tenue, sinon vers l'ennemi le plus proche, de tous les côtés</span>
@@ -225,6 +296,11 @@
 <div id="pause-menu" class="screen hidden">
   <div>
     <h1>Pause</h1>
+    <span class="mode-label">Contrôles</span>
+    <div class="mode-pick" role="group" aria-label="Contrôles">
+      <button type="button" id="mode-p-kbm" data-mode="kbm">⌨️ Clavier + souris</button>
+      <button type="button" id="mode-p-touch" data-mode="touch">📱 Tactile (iPad)</button>
+    </div><br>
     <div class="vol">Volume <input id="volume" type="range" min="0" max="100" value="70"></div>
     <button class="btn" id="btn-resume">Reprendre</button><br>
     <button class="btn alt" id="btn-restart">Recommencer</button>

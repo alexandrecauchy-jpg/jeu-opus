@@ -37,6 +37,14 @@ class Input {
     this.locked = false;
     this.lookX = 0;          // mouvement souris accumulé (caméra)
     this.lookY = 0;
+    // Mode de contrôle : 'kbm' (clavier + souris) ou 'touch' (iPad / tablette)
+    let saved = null;
+    try { saved = localStorage.getItem('donjon-controles'); } catch (err) { /* stockage indisponible */ }
+    const touchDevice = navigator.maxTouchPoints > 1 || matchMedia('(pointer: coarse)').matches;
+    this.mode = saved === 'touch' || saved === 'kbm' ? saved : (touchDevice ? 'touch' : 'kbm');
+    this.stick = { id: null, x: 0, y: 0, ox: 0, oy: 0 };
+    this.looks = new Map();
+    this.touchBlock = false;
     addEventListener('keydown', e => {
       if (e.repeat) return;
       this.keys.add(e.code);
@@ -57,6 +65,7 @@ class Input {
     cv.addEventListener('mousedown', e => {
       const g = this.game;
       g.audio.resume();
+      if (this.mode === 'touch') return;      // en mode tactile, la souris ne pilote pas le héros
       if (g.state === 'dialog' || g.state === 'note') { if (g.ui.advance) g.ui.advance(); return; }
       if (g.state !== 'play') return;
       if (!this.locked) {
@@ -76,6 +85,7 @@ class Input {
   }
 
   requestLock() {
+    if (this.mode === 'touch') return;
     try {
       const p = this.cv.requestPointerLock();
       if (p && p.catch) p.catch(() => {});
@@ -98,15 +108,106 @@ class Input {
     if (k.has('KeyS') || k.has('ArrowDown')) z -= 1;
     if (k.has('KeyA') || k.has('ArrowLeft')) x -= 1;
     if (k.has('KeyD') || k.has('ArrowRight')) x += 1;
+    let amount = 1;
+    if (!x && !z && this.stick.id !== null) {
+      // joystick : la distance au centre règle la vitesse (zone morte au milieu)
+      const m = Math.hypot(this.stick.x, this.stick.y);
+      if (m > 0.18) { x = this.stick.x; z = -this.stick.y; amount = Math.min(1, (m - 0.18) / 0.62 + 0.25); }
+    }
     if (!x && !z) return this.dir.set(0, 0, 0);
     const a = this.game.camYaw;
     const fx = Math.sin(a), fz = Math.cos(a);     // avant
     const rx = -Math.cos(a), rz = Math.sin(a);    // droite
-    return this.dir.set(fx * z + rx * x, 0, fz * z + rz * x).normalize();
+    return this.dir.set(fx * z + rx * x, 0, fz * z + rz * x).normalize().multiplyScalar(amount);
   }
 
   // Bouclier levé : clic droit maintenu ou Maj
-  get blockHeld() { return this.blockMouse || this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'); }
+  get blockHeld() { return this.blockMouse || this.touchBlock || this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'); }
+
+  // --- Commandes tactiles : joystick à gauche, caméra au doigt à droite, boutons d'action
+  setupTouch() {
+    const g = this.game;
+    const ui = document.getElementById('touch-ui');
+    const stickEl = document.getElementById('t-stick'), knob = document.getElementById('t-knob');
+    const hint = document.getElementById('t-stick-hint');
+    const held = new Map();
+    const R = 58;
+    const press = (btn, el) => {
+      el.classList.add('down');
+      if (btn === 'attack') this.attackHeld = true;
+      else if (btn === 'block') this.touchBlock = true;
+      else if (btn === 'roll') this.flags.roll = true;
+      else if (btn === 'potion') this.flags.drink = true;
+      else if (btn === 'use') g.interact();
+      else if (btn === 'weapon') g.cycleWeapon(1);
+      else if (btn === 'pause' && g.state === 'play') g.togglePause(true);
+    };
+    const release = (btn, el) => {
+      el.classList.remove('down');
+      if (btn === 'attack') this.attackHeld = false;
+      if (btn === 'block') this.touchBlock = false;
+    };
+    ui.addEventListener('touchstart', e => {
+      e.preventDefault();
+      g.audio.resume();
+      if (g.state === 'dialog' || g.state === 'note') { if (g.ui.advance) g.ui.advance(); return; }
+      for (const t of e.changedTouches) {
+        const el = t.target.closest && t.target.closest('[data-btn]');
+        if (el) { held.set(t.identifier, el); press(el.dataset.btn, el); continue; }
+        if (t.clientX < innerWidth * 0.45 && this.stick.id === null) {
+          Object.assign(this.stick, { id: t.identifier, ox: t.clientX, oy: t.clientY, x: 0, y: 0 });
+          stickEl.style.left = t.clientX + 'px';
+          stickEl.style.top = t.clientY + 'px';
+          stickEl.style.display = 'block';
+          knob.style.transform = '';
+          hint.style.display = 'none';
+          continue;
+        }
+        this.looks.set(t.identifier, { x: t.clientX, y: t.clientY });
+      }
+    }, { passive: false });
+    ui.addEventListener('touchmove', e => {
+      e.preventDefault();
+      for (const t of e.changedTouches) {
+        if (t.identifier === this.stick.id) {
+          let dx = t.clientX - this.stick.ox, dy = t.clientY - this.stick.oy;
+          const d = Math.hypot(dx, dy);
+          if (d > R) { dx *= R / d; dy *= R / d; }
+          this.stick.x = dx / R; this.stick.y = dy / R;
+          knob.style.transform = `translate(${dx}px, ${dy}px)`;
+        } else if (this.looks.has(t.identifier)) {
+          const p = this.looks.get(t.identifier);
+          this.lookX += (t.clientX - p.x) * 1.7;
+          this.lookY += (t.clientY - p.y) * 1.3;
+          p.x = t.clientX; p.y = t.clientY;
+        }
+      }
+    }, { passive: false });
+    const end = e => {
+      for (const t of e.changedTouches) {
+        const el = held.get(t.identifier);
+        if (el) { release(el.dataset.btn, el); held.delete(t.identifier); }
+        if (t.identifier === this.stick.id) {
+          Object.assign(this.stick, { id: null, x: 0, y: 0 });
+          stickEl.style.display = 'none';
+        }
+        this.looks.delete(t.identifier);
+      }
+    };
+    ui.addEventListener('touchend', end);
+    ui.addEventListener('touchcancel', end);
+    // Empêche le zoom par pincement de Safari pendant la partie
+    document.addEventListener('gesturestart', e => e.preventDefault());
+  }
+
+  resetTouch() {
+    this.stick.id = null; this.stick.x = this.stick.y = 0;
+    this.looks.clear();
+    this.touchBlock = false;
+    this.attackHeld = false;
+    document.getElementById('t-stick').style.display = 'none';
+    document.querySelectorAll('.tb.down').forEach(el => el.classList.remove('down'));
+  }
 
   consume(f) { const v = !!this.flags[f]; this.flags[f] = false; return v; }
   consumeRoll() { return this.consume('roll'); }
@@ -286,6 +387,14 @@ class Game {
     $('btn-respawn').onclick = () => this.respawn();
     $('btn-again').onclick = () => { this.ui.show('victory-screen', false); this.newGame(); };
     $('volume').oninput = e => this.audio.setVolume(e.target.value / 100);
+    for (const b of document.querySelectorAll('.mode-pick button')) b.onclick = () => this.setControlMode(b.dataset.mode);
+    this.setControlMode(this.input.mode);
+    this.input.setupTouch();
+    $('weapons').addEventListener('click', e => {
+      const slot = e.target.closest('.wslot');
+      if (slot && this.input.mode === 'touch' && this.state === 'play') this.switchWeapon(slot.dataset.weapon);
+    });
+    $('prompt').addEventListener('click', () => { if (this.input.mode === 'touch' && this.state === 'play') this.interact(); });
     const advance = () => { if (this.ui.advance) this.ui.advance(); };
     $('dialog').onclick = advance;
     $('note').onclick = advance;
@@ -405,6 +514,17 @@ class Game {
       if (list[n]) this.switchWeapon(list[n]);
     }
     if (code === 'Tab') { e.preventDefault(); this.cycleWeapon(1); }
+  }
+
+  // Choix des contrôles : clavier + souris ou tactile (iPad). Le choix est mémorisé.
+  setControlMode(mode) {
+    this.input.mode = mode;
+    document.body.classList.toggle('touch', mode === 'touch');
+    for (const b of document.querySelectorAll('.mode-pick button')) b.classList.toggle('on', b.dataset.mode === mode);
+    try { localStorage.setItem('donjon-controles', mode); } catch (err) { /* stockage indisponible */ }
+    if (mode === 'touch') this.input.releaseLock();
+    this.input.resetTouch();
+    if (this.ui) this.ui.lastPrompt = undefined;
   }
 
   togglePause(on) {
@@ -719,6 +839,8 @@ class Game {
   // -------------------------------------------------------------------------
   frame() {
     const rawDt = this.clock.getDelta();
+    const inGame = this.state === 'play' || this.state === 'dialog' || this.state === 'note';
+    if (inGame !== this.inGameClass) { this.inGameClass = inGame; document.body.classList.toggle('playing', inGame); if (!inGame) this.input.resetTouch(); }
     this.watchPerformance(rawDt);
     let dt = Math.min(0.05, rawDt);
     const playing = this.state === 'play';
